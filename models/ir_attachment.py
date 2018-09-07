@@ -105,7 +105,20 @@ class S3Attachment(models.Model):
             bin_value = value.decode('base64')
             fname, full_path = self._get_path(bin_value, checksum)
             key = self._get_s3_key(bin_value, checksum)
-            print "write: s3_bucket ", fname
+
+
+
+            try:
+                s3_key = self._s3_bucket.get_key(key)
+                s3_key.set_metadata('name', self.name)
+                s3_key.set_metadata('resid', self.res_id)
+                s3_key.set_metadata('resmodel', self.res_model)
+                s3_key.set_metadata('description', self.description)
+                s3_key.set_metadata('createdate', self.create_date)
+            except Exception:
+                _logger.error('S3: _file_write was not able tag key:%s', key)
+
+
 
             # use the same format as Odoo in case we need to mount it back
             try:
@@ -132,23 +145,26 @@ class S3Attachment(models.Model):
         storage = self._storage()
         if storage[:5] == 's3://':
             try:
-                s3_bucket = self._connect_to_S3_bucket(storage)
+                if not self._s3_bucket:
+                    self._s3_bucket = self._connect_to_S3_bucket(storage)
                 _logger.debug('S3: _file_gc_s3 connected Sucessfuly (%s)', storage)
             except Exception:
                 _logger.error('S3: _file_gc_s3 was not able to connect (%s)', storage)
                 return False
 
             try:
-                for s3_key_gc in s3_bucket.list(prefix=self._s3_key_from_fname('checklist')):
-                    real_key_name = s3_key_gc.key[len('checklist/'):]
-                    s3_key = s3_bucket.get_key(real_key_name)
+                for s3_key_gc in self._s3_bucket.list(prefix=self._s3_key_from_fname('checklist')):
+                    real_key_name = self._s3_key_from_fname(s3_key_gc.key[1 + len(self._s3_key_from_fname('checklist/')):])
+
+                    s3_key = self._s3_bucket.get_key(real_key_name)
                     if s3_key:
                         new_key = self._s3_key_from_fname('trash/%s' % real_key_name)
-                        s3_bucket.copy_key(new_key, s3_bucket.name, s3_key)
-                        s3_bucket.delete_key(s3_key)
-                        _logger.debug('S3: _file_gc_s3 deleted key:%s', real_key_name)
+                        s3_key.copy(self._s3_bucket.name, new_key)
+                        s3_key.delete()
+                        s3_key_gc.delete()
+                        _logger.debug('S3: _file_gc_s3 deleted key:%s successfully', real_key_name)
             except Exception:
-                _logger.error('S3: _file_gc_s3 was not able move to trash key:%s', real_key_name)
+                _logger.error('S3: _file_gc_s3 was not able move to gc/trash key:%s', real_key_name)
                 return False
         else:
             # storage is not as s3 type
@@ -160,7 +176,8 @@ class S3Attachment(models.Model):
         storage = self._storage()
         if storage[:5] == 's3://':
             try:
-                s3_bucket = self._connect_to_S3_bucket(storage)
+                if not self._s3_bucket:
+                    self._s3_bucket = self._connect_to_S3_bucket(storage)
                 _logger.debug('S3: File mark as gc. Connected Sucessfuly (%s)', storage)
             except Exception:
                 _logger.error('S3: File mark as gc. Was not able to connect (%s), gonna try other filestore', storage)
@@ -169,12 +186,12 @@ class S3Attachment(models.Model):
             new_key = self._s3_key_from_fname('checklist/%s' % fname)
 
             try:
-                s3_key = s3_bucket.get_key(new_key)
+                s3_key = self._s3_bucket.new_key(new_key)
                 # Just create an empty file to
                 s3_key.set_contents_from_string('')
-                _logger.debug('S3: File mark as gc. key:%s marked for garbage collection', new_key)
+                _logger.debug('S3: _mark_for_gc key:%s marked for garbage collection', new_key)
             except Exception:
-                _logger.error('S3: File mark as gc. Was not able to save key:%s', new_key)
+                _logger.error('S3: _mark_for_gc Was not able to save key:%s', new_key)
                 return super(S3Attachment, self)._mark_for_gc(fname)
 
         # Always do same in filestore anyway
