@@ -18,9 +18,13 @@ This last command will ask you for the ASW credentials and secret and will gener
 Start the Odoo server or use an existing instance. Update modules list and install *odoo_s3* module.
 Activate the developer model and find in:
 
-* Settings >> Parameters >> System Parameters (find **ir_attachment.location**)
+* Settings >> Technical >> Parameters >> System Parameters (find **ir_attachment.location**)
 
 The default should be loaded to: _s3://profile:default@testodoofs1_
 
 After you set the correct parameters Odoo will start saving new attachments to AWS S3 but the existing ones will stay in the filesystem until you run the auto vacuum scheduler.
-In order to 
+In order for ODoo to copy the filestore you need to open:
+
+* Settings >> Technical >> Automation >> Scheduled Actions (find **Auto-vacuum internal data**)
+
+Press run manually and Odoo will copy all files to S3 in a separated thread.

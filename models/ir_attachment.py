@@ -96,7 +96,9 @@ class S3Attachment(models.Model):
                 _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
             except Exception:
                 _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
-                r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
+                # Only try filesystem if the not copied to S3
+                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
         else:
             # storage is not as s3 type
             r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
@@ -131,9 +133,10 @@ class S3Attachment(models.Model):
                 _logger.debug('S3: _file_write  key:%s was successfully uploaded', key)
             except Exception:
                 _logger.error('S3: _file_write was not able to write, gonna try other filestore key:%s', key)
-                return super(S3Attachment, self)._file_write(value, checksum)
+                # Only try filesystem if the not copied to S3
+                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    return super(S3Attachment, self)._file_write(value, checksum)
         else:
-
             _logger.debug('S3: _file_write bypass to filesystem storage: %s', storage)
             return super(S3Attachment, self)._file_write(value, checksum)
 
@@ -217,7 +220,9 @@ class S3Attachment(models.Model):
                 _logger.debug('S3: File mark as gc. Connected Sucessfuly (%s)', storage)
             except Exception:
                 _logger.error('S3: File mark as gc. Was not able to connect (%s), gonna try other filestore', storage)
-                return super(S3Attachment, self)._mark_for_gc(fname)
+                # Only try filesystem if the not copied to S3
+                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    return super(S3Attachment, self)._mark_for_gc(fname)
 
             new_key = self._s3_key_from_fname('checklist/%s' % fname)
 
@@ -228,10 +233,12 @@ class S3Attachment(models.Model):
                 _logger.debug('S3: _mark_for_gc key:%s marked for garbage collection', new_key)
             except Exception:
                 _logger.error('S3: _mark_for_gc Was not able to save key:%s', new_key)
-                return super(S3Attachment, self)._mark_for_gc(fname)
-
-        # Always do same in filestore anyway
-        return super(S3Attachment, self)._mark_for_gc(fname)
+                # Only try filesystem if the not copied to S3
+                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    return super(S3Attachment, self)._mark_for_gc(fname)
+        else:
+            # if other storage type
+            return super(S3Attachment, self)._mark_for_gc(fname)
 
     def aws_cli(*cmd):
         old_env = dict(os.environ)
