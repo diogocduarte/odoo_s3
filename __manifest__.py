@@ -24,7 +24,7 @@
     'depends': ['base'],
     'auto_install': True,
     'external_dependencies': {
-        'python': ['boto'],
+        'python': ['awscli','boto3'],
     },
     'data': [
         'data/filestore_data.xml',
