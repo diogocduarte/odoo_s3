@@ -4,6 +4,7 @@
 
     'summary': """
         Allows you to use an aditional filestore with AWS S3.""",
+    'version': '1.1',
 
     'description': """
         The basis of the module is to allow the exact same structure of the odoo filestore
@@ -29,5 +30,6 @@
     'data': [
         'data/filestore_data.xml',
     ],
+    'post_init_hook': '_copy_filestore_to_s3',
     'installable': True
 }
