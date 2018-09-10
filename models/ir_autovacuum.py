@@ -8,8 +8,6 @@ class AutoVacuum(models.AbstractModel):
 
     @api.model
     def power_on(self, *args, **kwargs):
-        #
-        print "--------------------- S3 GC"
         self.env['ir.attachment']._copy_filestore_to_s3()
         self.env['ir.attachment']._file_gc_s3()
         return super(AutoVacuum, self).power_on(*args, **kwargs)

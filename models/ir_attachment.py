@@ -9,6 +9,7 @@ import base64
 import logging
 import re
 import os
+import threading
 
 from awscli.clidriver import create_clidriver
 
@@ -240,7 +241,6 @@ class S3Attachment(models.Model):
             env = os.environ.copy()
             env['LC_CTYPE'] = u'en_US.UTF'
             os.environ.update(env)
-            print "CMD:::::::", cmd
             # Run awscli in the same process
             exit_code = create_clidriver().main(cmd[1:])
 
@@ -251,16 +251,33 @@ class S3Attachment(models.Model):
             os.environ.clear()
             os.environ.update(old_env)
 
-    @api.model
     def _copy_filestore_to_s3(self):
+        with api.Environment.manage():
+            # As this function is in a new thread, I need to open a new cursor.
+            new_cr = self.pool.cursor()
+            self = self.with_env(self.env(cr=new_cr))
+            try:
+                self._run_copy_filestore_to_s3()
+                _logger.info('S3: filestore copied to S3 successfully')
+            except Exception:
+                _logger.info('S3: filestor copy to S3 aborted!')
+                self._cr.rollback()
+                self._cr.close()
+                return {}
+            finally:
+                new_cr.commit()
+                new_cr.close()
+            return {}
+
+    @api.model
+    def _run_copy_filestore_to_s3(self):
         storage = self._storage()
         is_copied = self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False)
-        print "---", storage
         scheme, access_type, profile_name, bucket_name = self._parse_storage_url(storage)
         if scheme == 's3://' and not is_copied:
             db_name = self.env.registry.db_name
             s3_url = 's3://%s/%s' % (bucket_name, db_name)
             full_path = self._full_path('')
             self.aws_cli('s3', 'cp', '--profile', profile_name, '--recursive', full_path, s3_url)
-            self.env['ir.config_parameter'].sudo().set_param('ir_attachment.location_s3_copied_to', s3_url, groups=['base.group_system'])
-
+            self.env['ir.config_parameter'].sudo().set_param('ir_attachment.location_s3_copied_to', '%' % s3_url,
+                                                             groups=['base.group_system'])
