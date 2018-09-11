@@ -22,6 +22,7 @@ class S3Attachment(models.Model):
     _s3_bucket = False
 
     s3_key = fields.Char('S3 Key')
+    s3_url = fields.Char('S3 Key', index=True, size=1024)
 
     def _parse_storage_url(self, bucket_url):
         scheme = bucket_url[:5]
@@ -78,71 +79,75 @@ class S3Attachment(models.Model):
         fname = sha[:2] + '/' + sha
         return '/'.join([db_name, fname])
 
-    @api.model
+    @api.multi
     def _file_read(self, fname, bin_size=False):
         storage = self._storage()
         r = ''
         if storage[:5] == 's3://':
-            try:
-                if not self._s3_bucket:
-                    self._s3_bucket = self._connect_to_S3_bucket(storage)
-            except Exception:
-                _logger.error('S3: _file_read Was not able to connect (%s), gonna try other filestore', storage)
-                return super(S3Attachment, self)._file_read(fname=fname, bin_size=bin_size)
+            for attachment in self:
+                try:
+                    if not self._s3_bucket:
+                        self._s3_bucket = self._connect_to_S3_bucket(storage)
+                except Exception:
+                    _logger.error('S3: _file_read Was not able to connect (%s), gonna try other filestore', storage)
+                    return super(S3Attachment, self)._file_read(fname=fname, bin_size=bin_size)
 
-            key = self._s3_key_from_fname(fname)
-            try:
-                s3_key = self._s3_bucket.Object(key)
-                r = base64.b64encode(s3_key.get()['Body'].read())
-                if not self.s3_key:
-                    self.url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
-                    self.s3_key = s3_key.key
-                _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
-            except Exception:
-                _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
-                # Only try filesystem if the not copied to S3
-                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
-                    r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
+                key = self._s3_key_from_fname(fname)
+                try:
+                    s3_key = self._s3_bucket.Object(key)
+                    r = base64.b64encode(s3_key.get()['Body'].read())
+                    if not attachment.s3_key:
+                        attachment.s3_key = s3_key.key
+                        attachment.s3_url = '%s/%s/%s' % (
+                        s3_key.meta.client.meta.endpoint_url, s3_key.bucket_name, s3_key.key)
+                        _logger.debug('S3: _file_read updated s3_url for key:%s', key)
+
+                    _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
+                except Exception:
+                    _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
+                    # Only try filesystem if the not copied to S3
+                    if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                        r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
         else:
             # storage is not as s3 type
             r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
         return r
 
-    @api.model
+    @api.multi
     def _file_write(self, value, checksum):
         storage = self._storage()
         if storage[:5] == 's3://':
-
-            try:
-                if not self._s3_bucket:
-                    self._s3_bucket = self._connect_to_S3_bucket(storage)
-            except Exception:
-                _logger.error('S3: _file_write was not able to connect (%s), gonna try other filestore', storage)
-                return super(S3Attachment, self)._file_write(value, checksum)
-            bin_value = value.decode('base64')
-            fname, full_path = self._get_path(bin_value, checksum)
-            key = self._get_s3_key(bin_value, checksum)
-
-            try:
-                s3_key = self._s3_bucket.Object(key)
-                metadata = {
-                    'name': self.name or '',
-                    'res_id': str(self.res_id) or '',
-                    'res_model': self.res_model or '',
-                    'description': self.description or '',
-                    'create_date': str(self.create_date or '')
-                }
-                s3_key.put(Body=bin_value, Metadata=metadata)
-                # Storing this info because can be usefull for later having public urls for assets
-                if not self.s3_key:
-                    self.url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
-                    self.s3_key = s3_key.key
-                _logger.debug('S3: _file_write  key:%s was successfully uploaded', key)
-            except Exception:
-                _logger.error('S3: _file_write was not able to write, gonna try other filestore key:%s', key)
-                # Only try filesystem if the not copied to S3
-                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+            for attachment in self:
+                try:
+                    if not self._s3_bucket:
+                        self._s3_bucket = self._connect_to_S3_bucket(storage)
+                except Exception:
+                    _logger.error('S3: _file_write was not able to connect (%s), gonna try other filestore', storage)
                     return super(S3Attachment, self)._file_write(value, checksum)
+                bin_value = value.decode('base64')
+                fname, full_path = self._get_path(bin_value, checksum)
+                key = self._get_s3_key(bin_value, checksum)
+
+                try:
+                    s3_key = self._s3_bucket.Object(key)
+                    metadata = {
+                        'name': self.name or '',
+                        'res_id': str(self.res_id) or '',
+                        'res_model': self.res_model or '',
+                        'description': self.description or '',
+                        'create_date': str(self.create_date or '')
+                    }
+                    s3_key.put(Body=bin_value, Metadata=metadata)
+                    # Storing this info because can be usefull for later having public urls for assets
+                    if not attachment.s3_key:
+                        attachment.s3_url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
+                        attachment.s3_key = s3_key.key
+                    _logger.debug('S3: _file_write  key:%s was successfully uploaded', key)
+                except Exception:
+                    _logger.error('S3: _file_write was not able to write, gonna try other filestore key:%s', key)
+                    # Only try filesystem if the not copied to S3
+                    if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                        return super(S3Attachment, self)._file_write(value, checksum)
         else:
             _logger.debug('S3: _file_write bypass to filesystem storage: %s', storage)
             return super(S3Attachment, self)._file_write(value, checksum)

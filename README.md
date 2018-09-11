@@ -28,3 +28,9 @@ In order for ODoo to copy the filestore you need to open:
 * Settings >> Technical >> Automation >> Scheduled Actions (find **Auto-vacuum internal data**)
 
 Press run manually and Odoo will copy all files to S3 in a separated thread.
+
+Also recommend using on your odoo.conf file on server wide modules:
+
+```bash
+server_wide_modules = odoo_s3,web,web_kanban
+```
