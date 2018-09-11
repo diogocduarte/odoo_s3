@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import api, models
+from odoo import api, models, fields
 
 import boto3
 import botocore
@@ -9,7 +9,6 @@ import base64
 import logging
 import re
 import os
-import threading
 
 from awscli.clidriver import create_clidriver
 
@@ -21,6 +20,8 @@ class S3Attachment(models.Model):
     """
     _inherit = "ir.attachment"
     _s3_bucket = False
+
+    s3_key = fields.Char('S3 Key')
 
     def _parse_storage_url(self, bucket_url):
         scheme = bucket_url[:5]
@@ -93,6 +94,9 @@ class S3Attachment(models.Model):
             try:
                 s3_key = self._s3_bucket.Object(key)
                 r = base64.b64encode(s3_key.get()['Body'].read())
+                if not self.s3_key:
+                    self.url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
+                    self.s3_key = s3_key.key
                 _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
             except Exception:
                 _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
@@ -128,8 +132,11 @@ class S3Attachment(models.Model):
                     'description': self.description or '',
                     'create_date': str(self.create_date or '')
                 }
-                print metadata
                 s3_key.put(Body=bin_value, Metadata=metadata)
+                # Storing this info because can be usefull for later having public urls for assets
+                if not self.s3_key:
+                    self.url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
+                    self.s3_key = s3_key.key
                 _logger.debug('S3: _file_write  key:%s was successfully uploaded', key)
             except Exception:
                 _logger.error('S3: _file_write was not able to write, gonna try other filestore key:%s', key)
@@ -260,20 +267,11 @@ class S3Attachment(models.Model):
 
     def _copy_filestore_to_s3(self):
         with api.Environment.manage():
-            # As this function is in a new thread, I need to open a new cursor.
-            new_cr = self.pool.cursor()
-            self = self.with_env(self.env(cr=new_cr))
             try:
                 self._run_copy_filestore_to_s3()
                 _logger.info('S3: filestore copied to S3 successfully')
             except Exception:
-                _logger.info('S3: filestor copy to S3 aborted!')
-                self._cr.rollback()
-                self._cr.close()
-                return {}
-            finally:
-                new_cr.commit()
-                new_cr.close()
+                _logger.info('S3: filestore copy to S3 aborted!')
             return {}
 
     @api.model
