@@ -34,3 +34,52 @@ Also recommend using on your odoo.conf file on server wide modules:
 ```bash
 server_wide_modules = odoo_s3,web,web_kanban
 ```
+
+## Maintenance
+
+To check what is the status of the filestore we can run a toll in Odoo shell environment:
+
+```bash
+IPython 5.6.0 -- An enhanced Interactive Python.
+?         -> Introduction and overview of IPython's features.
+%quickref -> Quick reference.
+help      -> Python's own help system.
+object?   -> Details about 'object', use 'object??' for extra details.
+
+In [1]: res_list, totals = env['ir.attachment'].search([]).check_s3_filestore()
+2018-09-12 14:41:10,962 3522 INFO v10_odoo_s3 botocore.credentials: Found credentials in shared credentials file: ~/.aws/credentials
+2018-09-12 14:41:17,167 3522 ERROR v10_odoo_s3 odoo.addons.odoo_s3.models.ir_attachment: S3: _file_read was not able to read from S3 or other filestore key:v10_odoo_s3/91/91c1ab69ca4a6c3c5e9c32187cb975d19b194b93
+2018-09-12 14:41:29,978 3522 ERROR v10_odoo_s3 odoo.addons.odoo_s3.models.ir_attachment: S3: _file_read was not able to read from S3 or other filestore key:v10_odoo_s3/6b/6bc87910870d5ec831c3adbf4df22c5bbed1fe31
+2018-09-12 14:41:30,375 3522 ERROR v10_odoo_s3 odoo.addons.odoo_s3.models.ir_attachment: S3: _file_read was not able to read from S3 or other filestore key:v10_odoo_s3/cc/ccd41799069ae21b845f931369eca4f9fdc76ba5
+2018-09-12 14:41:30,682 3522 ERROR v10_odoo_s3 odoo.addons.odoo_s3.models.ir_attachment: S3: _file_read was not able to read from S3 or other filestore key:v10_odoo_s3/4f/4f21892e89f55600f30723c55094ac8658a48bab
+
+In [2]: totals
+Out[2]: {'lost_count': 4}
+
+In [3]: filter(lambda x: x['s3_lost']==True, res_list)
+Out[3]: 
+[{'error': 'Not Found',
+  'fname': u'91/91c1ab69ca4a6c3c5e9c32187cb975d19b194b93',
+  'name': u'/mail/static/src/less/web.assets_backend/followers.less.css',
+  's3_lost': True},
+ {'error': 'Not Found',
+  'fname': u'6b/6bc87910870d5ec831c3adbf4df22c5bbed1fe31',
+  'name': u'Screenshot-20180904222459-481x628.png',
+  's3_lost': True},
+ {'error': 'Not Found',
+  'fname': u'cc/ccd41799069ae21b845f931369eca4f9fdc76ba5',
+  'name': u'Menu_009.png',
+  's3_lost': True},
+ {'error': 'Not Found',
+  'fname': u'4f/4f21892e89f55600f30723c55094ac8658a48bab',
+  'name': u'Screenshot-20180903121333-1348x741.png',
+  's3_lost': True}]
+
+In [4]: env.cr.commit() # to make sure that field s3_lost gets updated
+
+```
+
+In the described scenarion we will have the s3_lost field updated in the database and that
+ allows us to drop and recreate the missing assets, if that's the situation.
+ 
+ You can also find other results using the filter expression or sorting and grouping this dictionary.
