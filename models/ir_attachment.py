@@ -65,15 +65,12 @@ class S3Attachment(models.Model):
 
         return s3_bucket
 
-    @api.model
-    def _s3_key_from_fname(self, path):
-        # sanitize path
+    def _s3_key_from_fname(self, store_fname):
         db_name = self.env.registry.db_name
-        path = re.sub('[.]', '', path)
-        path = path.strip('/\\')
-        return '/'.join([db_name, path])
+        store_fname = re.sub('[.]', '', store_fname)
+        store_fname = store_fname.strip('/\\')
+        return '/'.join([db_name, store_fname])
 
-    @api.model
     def _get_s3_key(self, bin_data, sha):
         # scatter files across 256 dirs
         # we use '/' in the db (even on windows)
@@ -86,14 +83,14 @@ class S3Attachment(models.Model):
         storage = self._storage()
         r = ''
         if storage[:5] == 's3://':
-            for attachment in self:
-                try:
-                    if not self._s3_bucket:
-                        self._s3_bucket = self._connect_to_S3_bucket(storage)
-                except Exception:
-                    _logger.error('S3: _file_read Was not able to connect (%s), gonna try other filestore', storage)
-                    return super(S3Attachment, self)._file_read(fname=fname, bin_size=bin_size)
+            try:
+                if not self._s3_bucket:
+                    self._s3_bucket = self._connect_to_S3_bucket(storage)
+            except Exception:
+                _logger.error('S3: _file_read Was not able to connect (%s), gonna try other filestore', storage)
+                return super(S3Attachment, self)._file_read(fname=fname, bin_size=bin_size)
 
+            for attachment in self:
                 key = self._s3_key_from_fname(fname)
                 try:
                     s3_key = self._s3_bucket.Object(key)
@@ -120,13 +117,14 @@ class S3Attachment(models.Model):
     def _file_write(self, value, checksum):
         storage = self._storage()
         if storage[:5] == 's3://':
+            try:
+                if not self._s3_bucket:
+                    self._s3_bucket = self._connect_to_S3_bucket(storage)
+            except Exception:
+                _logger.error('S3: _file_write was not able to connect (%s), gonna try other filestore', storage)
+                return super(S3Attachment, self)._file_write(value, checksum)
+
             for attachment in self:
-                try:
-                    if not self._s3_bucket:
-                        self._s3_bucket = self._connect_to_S3_bucket(storage)
-                except Exception:
-                    _logger.error('S3: _file_write was not able to connect (%s), gonna try other filestore', storage)
-                    return super(S3Attachment, self)._file_write(value, checksum)
                 bin_value = value.decode('base64')
                 fname, full_path = self._get_path(bin_value, checksum)
                 key = self._get_s3_key(bin_value, checksum)
@@ -294,3 +292,70 @@ class S3Attachment(models.Model):
             self.aws_cli('s3', 'cp', '--profile', profile_name, '--recursive', full_path, s3_url)
             self.env['ir.config_parameter'].sudo().set_param('ir_attachment.location_s3_copied_to', '%' % s3_url,
                                                              groups=['base.group_system'])
+    @api.multi
+    def check_s3_filestore(self):
+        """This command is here for being trigger using odoo shell:
+
+        e.g.:
+
+        $> a, b = env['ir.attachment'].search([]).check_s3_filestore()
+        $> filter(lambda x: x['s3_lost']==True, a)
+        $> print b # will show totals
+        $> env.cr.commit() # need to do this to update the table s3_lost field
+
+        """
+        storage = self._storage()
+        if storage[:5] != 's3://':
+            return
+
+        try:
+            if not self._s3_bucket:
+                self._s3_bucket = self._connect_to_S3_bucket(storage)
+            _logger.debug('S3: _file_gc_s3 connected Sucessfuly (%s)', storage)
+        except Exception:
+            _logger.error('S3: _file_gc_s3 was not able to connect (%s)', storage)
+            return False
+
+        status_res = []
+        totals = {
+            'lost_count': 0,
+        }
+
+        for att in self:
+            status = {}
+            status['name'] = att.name
+            status['fname'] = att.store_fname
+            status['s3_lost'] = False
+
+            try:
+                if not att.store_fname:
+                    raise Exception('There is no store_fname')
+                key = self._s3_key_from_fname(att.store_fname)
+                s3_key = self._s3_bucket.Object(key)
+
+                # will return 404 if not exists
+                chk = s3_key.content_type is False
+
+                if not att.s3_key:
+                    att.s3_key = s3_key.key
+                    att.s3_url = '%s/%s/%s' % (
+                        s3_key.meta.client.meta.endpoint_url, s3_key.bucket_name, s3_key.key)
+                    _logger.debug('S3: _file_read updated s3_url for key:%s', key)
+
+                _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
+
+            except ClientError as ex:
+                if int(ex.response['Error']['Code']) == 404:
+                    status['s3_lost'] = True
+                    totals['lost_count'] += 1
+
+                _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
+                att.s3_lost = True
+                status['error'] = ex.response['Error']['Message']
+
+            except Exception as e:
+                status['error'] = e.message
+            status_res.append(status)
+
+        return status_res, totals
+

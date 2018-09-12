@@ -24,7 +24,7 @@
             <xpath expr="//field[@name='name']" position="after">
                 <field name="s3_key"/>
                 <field name="s3_url"/>
-                <field name="s3_lost"/>
+                <filter name="published" string="Not Found S3" domain="[('s3_lost', '=', True)]"/>
             </xpath>
         </field>
     </record>
