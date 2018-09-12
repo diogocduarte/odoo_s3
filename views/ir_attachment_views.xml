@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+    <!-- form view inherit -->
+    <record id="ir_attachment_s3_form_inherit" model="ir.ui.view">
+        <field name="name">ir.attachment.s3.form.inherit</field>
+        <field name="model">ir.attachment</field>
+        <field name="inherit_id" ref="base.view_attachment_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='mimetype']" position="before">
+                <field name="s3_key" readonly="1"/>
+                <field name="s3_url" readonly="1"/>
+                <field name="s3_lost" readonly="1"/>
+            </xpath>
+        </field>
+    </record>
+    <!-- search inherit -->
+    <record id="view_attachment_s3_search_inherit" model="ir.ui.view">
+        <field name="name">ir.attachment.s3.search.inherit</field>
+        <field name="model">ir.attachment</field>
+        <field name="inherit_id" ref="base.view_attachment_search"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='name']" position="after">
+                <field name="s3_key"/>
+                <field name="s3_url"/>
+                <field name="s3_lost"/>
+            </xpath>
+        </field>
+    </record>
+    </data>
+</odoo>

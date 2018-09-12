@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
 from odoo import api, models, fields
 
@@ -21,8 +22,9 @@ class S3Attachment(models.Model):
     _inherit = "ir.attachment"
     _s3_bucket = False
 
-    s3_key = fields.Char('S3 Key')
-    s3_url = fields.Char('S3 Key', index=True, size=1024)
+    s3_key = fields.Char('S3 Key', index=True)
+    s3_url = fields.Char('S3 Url', index=True, size=1024)
+    s3_lost = fields.Boolean('S3 Not Found')
 
     def _parse_storage_url(self, bucket_url):
         scheme = bucket_url[:5]
@@ -105,6 +107,7 @@ class S3Attachment(models.Model):
                     _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
                 except Exception:
                     _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
+                    attachment.s3_lost = True
                     # Only try filesystem if the not copied to S3
                     if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
                         r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)

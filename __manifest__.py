@@ -29,6 +29,7 @@
     },
     'data': [
         'data/filestore_data.xml',
+        'views/ir_attachment_views.xml',
     ],
     'post_init_hook': '_copy_filestore_to_s3',
     'installable': True

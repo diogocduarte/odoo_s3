@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright 2018 OdooGap, Diogo Duarte <dduarte@odoogap.com>
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
 from odoo import api, models
 from odoo import SUPERUSER_ID
