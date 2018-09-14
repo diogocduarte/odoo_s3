@@ -4,14 +4,12 @@
 
 from odoo import api, models
 from odoo import SUPERUSER_ID
-import threading
 
 
 def copy_filestore_to_s3(cr, registry):
     ''' This is a utility function used to preserve existing previous tags during upgrade of the module.'''
     env = api.Environment(cr, SUPERUSER_ID, {})
-    threaded_copy = threading.Thread(target=env['ir.attachment']._copy_filestore_to_s3(), args=())
-    threaded_copy.start()
+    env['ir.attachment']._copy_filestore_to_s3()
     return True
 
 class AutoVacuum(models.AbstractModel):

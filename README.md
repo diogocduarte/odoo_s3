@@ -6,8 +6,14 @@ After the propper key is loaded then the server will start witing new files to S
 
 ## Requirements
 
+
+* awscli - v1.16.9
+* boto3 - v1.8.9
+* botocore - v1.11.9
+
+
 ```bash
-$> pip install awscli boto3
+$> pip install -r requirements.txt
 $> aws configure
 ```
 

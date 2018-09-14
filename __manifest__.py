@@ -23,7 +23,7 @@
     'category': 'Uncategorized',
     'version': '0.1',
     'depends': ['base'],
-    'auto_install': True,
+    'auto_install': False,
     'external_dependencies': {
         'python': ['awscli', 'boto3'],
     },
