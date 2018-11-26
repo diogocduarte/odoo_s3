@@ -22,15 +22,15 @@
     'website': "http://diogocduarte.github.io/",
     'category': 'Uncategorized',
     'version': '0.1',
-    'depends': ['base'],
-    'auto_install': False,
+    'depends': ['base', 'base_setup'],
+    'auto_install': True,
     'external_dependencies': {
         'python': ['awscli', 'boto3'],
     },
     'data': [
         'data/filestore_data.xml',
         'views/ir_attachment_views.xml',
+        'views/res_config_views.xml'
     ],
-    'post_init_hook': '_copy_filestore_to_s3',
     'installable': True
 }

@@ -7,7 +7,6 @@ After the propper key is loaded then the server will start witing new files to S
 ## Requirements
 
 
-* awscli - v1.16.9
 * boto3 - v1.8.9
 * botocore - v1.11.9
 
@@ -26,20 +25,56 @@ Activate the developer model and find in:
 
 * Settings >> Technical >> Parameters >> System Parameters (find **ir_attachment.location**)
 
-The default should be loaded to: _s3://profile:default@testodoofs1_
+The default should be: _s3://profile:default@testodoofs1_
 
-After you set the correct parameters Odoo will start saving new attachments to AWS S3 but the existing ones will stay in the filesystem until you run the auto vacuum scheduler.
-In order for ODoo to copy the filestore you need to open:
+To move the filestore to S3 go to:
 
-* Settings >> Technical >> Automation >> Scheduled Actions (find **Auto-vacuum internal data**)
+* Settings >> General Settings (find **AWS S3 Storage**)
 
-Press run manually and Odoo will copy all files to S3 in a separated thread.
+Set the S3 profile and bucket and check 'Load S3 with existing filestore?' and Apply.
+
+Or if you prefer you can order this using xml-rpc lib:
+
+```python
+# -*- coding: utf-8 -*-
+import xmlrpclib
+
+# Instance Credentials
+dbname = 'v10_odoo_s3'
+user = 'admin'
+pwd = 'admin'
+host = 'localhost'
+port = 8069
+protocol = 'http'
+
+com = xmlrpclib.ServerProxy("%s://%s:%s/xmlrpc/common" % (protocol, host, port))
+uid = com.login(dbname, user, pwd)
+sock = xmlrpclib.ServerProxy("%s://%s:%s/xmlrpc/object" % (protocol, host, port))
+
+config_id = sock.execute(dbname, uid, pwd, 'base.config.settings', 'create', [], {
+    's3_profile': 'default',
+    's3_bucket': 'testodoofs1',
+    's3_load': True
+})
+res = sock.execute(dbname, uid, pwd, 'base.config.settings', 'execute', [config_id])
+```
 
 Also recommend using on your odoo.conf file on server wide modules:
 
 ```bash
 server_wide_modules = odoo_s3,web,web_kanban
 ```
+
+### What will happen
+
+Odoo will install without the s3 filestore and after initialization will move all files to the bucket.
+This will happen using the bucket_name in odoo_s3/data/filestore_data.xml
+
+## Changelog
+
+* added recovery of trashed files if there is a failed read
+* changed the dependency from awscli for initial move of the fs
+
 
 ## Maintenance
 
@@ -85,7 +120,7 @@ In [4]: env.cr.commit() # to make sure that field s3_lost gets updated
 
 ```
 
-In the described scenarion we will have the s3_lost field updated in the database and that
+In the described scenario we will have the s3_lost field updated in the database and that
  allows us to drop and recreate the missing assets, if that's the situation.
  
  You can also find other results using the filter expression or sorting and grouping this dictionary.
