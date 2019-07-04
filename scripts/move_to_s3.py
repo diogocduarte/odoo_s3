@@ -15,9 +15,9 @@ uid = com.login(dbname, user, pwd)
 sock = xmlrpclib.ServerProxy("%s://%s:%s/xmlrpc/object" % (protocol, host, port))
 
 
-config_id = sock.execute(dbname, uid, pwd, 'base.config.settings', 'create', [], {
+config_id = sock.execute(dbname, uid, pwd, 'res.config.settings', 'create', [], {
     's3_profile': 'default',
     's3_bucket': 'testodoofs1',
     's3_load': True
 })
-res = sock.execute(dbname, uid, pwd, 'base.config.settings', 'execute', [config_id])
+res = sock.execute(dbname, uid, pwd, 'res.config.settings', 'execute', [config_id])

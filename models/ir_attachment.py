@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
 from odoo import api, models, fields
@@ -47,6 +46,9 @@ class S3Attachment(models.Model):
         if access_type == 'profile':
             session = boto3.session.Session(profile_name=profile_name)
             s3_conn = session.resource('s3')
+            region = session.region_name
+        else:
+            raise NotImplemented
 
         # Get bucket or create one
         s3_bucket = s3_conn.Bucket(bucket_name)
@@ -59,8 +61,11 @@ class S3Attachment(models.Model):
                 exists = False
 
         if not exists:
-            s3_bucket.create_bucket(Bucket=bucket_name)
-
+            location = {'LocationConstraint': region}
+            s3_conn.create_bucket(
+                Bucket=bucket_name,
+                CreateBucketConfiguration=location
+            )
         return s3_bucket
 
     def _s3_key_from_fname(self, store_fname):
@@ -85,7 +90,8 @@ class S3Attachment(models.Model):
                 if not self._s3_bucket:
                     self._s3_bucket = self._connect_to_S3_bucket(storage)
             except Exception:
-                _logger.error('S3: _file_read Was not able to connect (%s), gonna try other filestore', storage)
+                _logger.error('S3: _file_read Was not able to connect ({}), '
+                              'gonna try other filestore'.format(storage))
                 return super(S3Attachment, self)._file_read(fname=fname, bin_size=bin_size)
 
             # It's not a @multi but i always use a for instead of an if exists because makes it easy to switch to multi
@@ -98,14 +104,15 @@ class S3Attachment(models.Model):
                     # Set the field s3_key on the attachment, if not there already
                     if not attachment.s3_key:
                         attachment.s3_key = s3_key.key
-                        attachment.s3_url = '%s/%s/%s' % (
+                        attachment.s3_url = '{}/{}/{}'.format(
                             s3_key.meta.client.meta.endpoint_url, s3_key.bucket_name, s3_key.key)
-                        _logger.debug('S3: _file_read updated s3_url for key:%s', key)
+                        _logger.debug('S3: _file_read updated s3_url for key:{}'.format(key))
 
-                    _logger.debug('S3: _file_read read key:%s from bucket successfully', key)
+                    _logger.debug('S3: _file_read read key:{} from bucket successfully'.format(key))
 
                 except Exception:
-                    _logger.error('S3: _file_read was not able to read from S3 or other filestore key:%s', key)
+                    _logger.error('S3: _file_read was not able to read from S3 or other filestore'
+                                  ' key:{}'.format(key))
                     # Check the trash
                     try:
                         trash_key_list = key.split('/')
@@ -114,25 +121,30 @@ class S3Attachment(models.Model):
                         # Try reading trash key
                         s3_trash_key = self._s3_bucket.Object(trash_key)
                         r = base64.b64encode(s3_trash_key.get()['Body'].read())
-                        _logger.debug('S3: _file_read read key:%s from bucket trash bin', s3_trash_key)
+                        _logger.debug('S3: _file_read read key:{} from bucket trash bin'.format(
+                            s3_trash_key))
                         # Restore the file
-                        self._s3_bucket.Object(key).copy_from(CopySource='%s/%s' % (s3_trash_key.bucket_name, s3_trash_key.key))
+                        self._s3_bucket.Object(key).copy_from(CopySource='{}/{}'.format(
+                            s3_trash_key.bucket_name, s3_trash_key.key))
                         s3_trash_key.delete()
-                        _logger.debug('S3: _file_read --::-- restored the key:%s from bucket trash bin key %s', s3_trash_key.key, key)
+                        _logger.debug('S3: _file_read --::-- restored the key:{} from bucket'
+                                      ' trash bin key {}'.format(s3_trash_key.key, key))
 
                     except Exception:
-                        _logger.error('S3: _file_read also not able to find in trash the key:%s', key)
+                        _logger.error('S3: _file_read also not able to find in trash the key: '
+                                      '{}'.format(key))
 
                     attachment.s3_lost = True
                     # Only try filesystem if the not copied to S3
-                    if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    if not self.env['ir.config_parameter'].sudo().get_param(
+                            'ir_attachment.location_s3_copied_to', False):
                         r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
         else:
             # storage is not as s3 type
             r = super(S3Attachment, self)._file_read(fname, bin_size=bin_size)
         return r
 
-    @api.multi
+    @api.model
     def _file_write(self, value, checksum):
         storage = self._storage()
         if storage[:5] == 's3://':
@@ -140,16 +152,20 @@ class S3Attachment(models.Model):
                 if not self._s3_bucket:
                     self._s3_bucket = self._connect_to_S3_bucket(storage)
             except Exception:
-                _logger.error('S3: _file_write was not able to connect (%s), gonna try other filestore', storage)
+                _logger.error('S3: _file_write was not able to connect ({}), '
+                              'gonna try other filestore'.format(storage))
                 return super(S3Attachment, self)._file_write(value, checksum)
 
             for attachment in self:
-                bin_value = value.decode('base64')
+                bin_value = base64.b64decode(value)
                 fname, full_path = self._get_path(bin_value, checksum)
                 key = self._get_s3_key(bin_value, checksum)
 
                 try:
                     s3_key = self._s3_bucket.Object(key)
+                    # todo: check if we can get these values from context,
+                    # we do not want to change the method type, this could cause trouble with other
+                    # custom apps
                     metadata = {
                         'name': self.name or '',
                         'res_id': str(self.res_id) or '',
@@ -160,16 +176,19 @@ class S3Attachment(models.Model):
                     s3_key.put(Body=bin_value, Metadata=metadata)
                     # Storing this info because can be usefull for later having public urls for assets
                     if not attachment.s3_key:
-                        attachment.s3_url = '%s/%s/%s' % (s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
+                        attachment.s3_url = '{}/{}/{}'.format(
+                            s3_key.meta.client.meta.endpoint_url , s3_key.bucket_name, s3_key.key)
                         attachment.s3_key = s3_key.key
-                    _logger.debug('S3: _file_write  key:%s was successfully uploaded', key)
+                    _logger.debug('S3: _file_write  key:{} was successfully uploaded'.format(key))
                 except Exception:
-                    _logger.error('S3: _file_write was not able to write, gonna try other filestore key:%s', key)
+                    _logger.error('S3: _file_write was not able to write, gonna try other '
+                                  'filestore key: {}'.format(key))
                     # Only try filesystem if the not copied to S3
-                    if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                    if not self.env['ir.config_parameter'].sudo().get_param(
+                            'ir_attachment.location_s3_copied_to', False):
                         return super(S3Attachment, self)._file_write(value, checksum)
         else:
-            _logger.debug('S3: _file_write bypass to filesystem storage: %s', storage)
+            _logger.debug('S3: _file_write bypass to filesystem storage: {}'.format(storage))
             return super(S3Attachment, self)._file_write(value, checksum)
 
         # Returning the file name
@@ -184,9 +203,9 @@ class S3Attachment(models.Model):
         try:
             if not self._s3_bucket:
                 self._s3_bucket = self._connect_to_S3_bucket(storage)
-            _logger.debug('S3: _file_gc_s3 connected Sucessfuly (%s)', storage)
+            _logger.debug('S3: _file_gc_s3 connected Sucessfuly ({})'.format(storage))
         except Exception:
-            _logger.error('S3: _file_gc_s3 was not able to connect (%s)', storage)
+            _logger.error('S3: _file_gc_s3 was not able to connect ({})'.format(storage))
             return False
 
         # Continue in a new transaction. The LOCK statement below must be the
@@ -205,8 +224,10 @@ class S3Attachment(models.Model):
         try:
             # retrieve the file names from the checklist
             checklist = {}
-            for s3_key_gc in self._s3_bucket.objects.filter(Prefix=self._s3_key_from_fname('checklist')):
-                real_key_name = self._s3_key_from_fname(s3_key_gc.key[1 + len(self._s3_key_from_fname('checklist/')):])
+            for s3_key_gc in self._s3_bucket.objects.filter(
+                    Prefix=self._s3_key_from_fname('checklist')):
+                real_key_name = self._s3_key_from_fname(
+                    s3_key_gc.key[1 + len(self._s3_key_from_fname('checklist/')):])
                 checklist[real_key_name] = s3_key_gc.key
 
             # determine which files to keep among the checklist
@@ -222,26 +243,29 @@ class S3Attachment(models.Model):
                     # Get the real key from the bucket
                     s3_key = self._s3_bucket.Object(real_key_name)
 
-                    # new_key = self._s3_key_from_fname('trash/%s' % real_key_name)
-                    new_key = self._s3_key_from_fname('trash/%s' % '/'.join(real_key_name.split('/')[1:]))
+                    new_key = self._s3_key_from_fname('trash/{}'.format('/').join(
+                        real_key_name.split('/')[1:]))
                     trashed_key = self._s3_bucket.Object(new_key).copy_from(
                         CopySource={'Bucket': self._s3_bucket.name, 'Key': real_key_name})
                     s3_key.delete()
                     s3_key_gc = self._s3_bucket.Object(check_key_name)
                     s3_key_gc.delete()
                     removed += 1
-                    _logger.debug('S3: _file_gc_s3 deleted key:%s successfully (moved to %s)', real_key_name, trashed_key.key)
+                    _logger.debug('S3: _file_gc_s3 deleted key:{} successfully (moved to {})'
+                                  .format(real_key_name, trashed_key.key))
 
         except ClientError as ex:
-            _logger.error('S3: _file_gc_s3 (key:%s) (checklist_key:%s) %s:%s', real_key_name, check_key_name,
-                          ex.response['Error']['Code'], ex.response['Error']['Message'])
+            _logger.error('S3: _file_gc_s3 (key:{}) (checklist_key:{}) {}:{}'.format(
+                real_key_name, check_key_name,
+                ex.response['Error']['Code'], ex.response['Error']['Message']))
 
         except Exception as ex:
-            _logger.error('S3: _file_gc_s3 was not able to gc (key:%s) (checklist_key:%s)', real_key_name, check_key_name)
+            _logger.error('S3: _file_gc_s3 was not able to gc (key:{}) (checklist_key:{})'.format(
+                real_key_name, check_key_name))
 
         # commit to release the lock
         cr.commit()
-        _logger.info("S3: filestore gc %d checked, %d removed", len(checklist), removed)
+        _logger.info("S3: filestore gc {} checked, {} removed".format(len(checklist), removed))
 
     def _mark_for_gc(self, fname):
         """ We will mark for garbage collection in both s3 and filesystem
@@ -251,24 +275,28 @@ class S3Attachment(models.Model):
             try:
                 if not self._s3_bucket:
                     self._s3_bucket = self._connect_to_S3_bucket(storage)
-                _logger.debug('S3: File mark as gc. Connected Sucessfuly (%s)', storage)
+                _logger.debug('S3: File mark as gc. Connected Sucessfuly ({})'.format(storage))
             except Exception:
-                _logger.error('S3: File mark as gc. Was not able to connect (%s), gonna try other filestore', storage)
+                _logger.error('S3: File mark as gc. Was not able to connect ({}), '
+                              'gonna try other filestore'.format(storage))
                 # Only try filesystem if the not copied to S3
-                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                if not self.env['ir.config_parameter'].sudo().get_param(
+                        'ir_attachment.location_s3_copied_to', False):
                     return super(S3Attachment, self)._mark_for_gc(fname)
 
-            new_key = self._s3_key_from_fname('checklist/%s' % fname)
+            new_key = self._s3_key_from_fname('checklist/{}'.format(fname))
 
             try:
                 s3_key = self._s3_bucket.Object(new_key)
                 # Just create an empty file to
                 s3_key.put(Body='')
-                _logger.debug('S3: _mark_for_gc key:%s marked for garbage collection', new_key)
+                _logger.debug('S3: _mark_for_gc key:{} marked for garbage collection'.format(
+                    new_key))
             except Exception:
-                _logger.error('S3: _mark_for_gc Was not able to save key:%s', new_key)
+                _logger.error('S3: _mark_for_gc Was not able to save key:{}'.format(new_key))
                 # Only try filesystem if the not copied to S3
-                if not self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False):
+                if not self.env['ir.config_parameter'].sudo().get_param(
+                        'ir_attachment.location_s3_copied_to', False):
                     return super(S3Attachment, self)._mark_for_gc(fname)
         else:
             # if other storage type
@@ -286,29 +314,32 @@ class S3Attachment(models.Model):
     @api.model
     def _run_copy_filestore_to_s3(self):
         storage = self._storage()
-        is_copied = self.env['ir.config_parameter'].sudo().get_param('ir_attachment.location_s3_copied_to', False)
+        is_copied = self.env['ir.config_parameter'].sudo().get_param(
+            'ir_attachment.location_s3_copied_to', False)
         scheme, access_type, profile_name, bucket_name = self._parse_storage_url(storage)
         if scheme == 's3://' and not is_copied:
             db_name = self.env.registry.db_name
-            s3_url = 's3://%s/%s' % (bucket_name, db_name)
+            s3_url = 's3://{}/{}'.format(bucket_name, db_name)
             full_path = self._full_path('')
             try:
                 if not self._s3_bucket:
                     self._s3_bucket = self._connect_to_S3_bucket(storage)
-                _logger.debug('S3: Copy filestore to S3. Connected Sucessfuly (%s)', storage)
+                _logger.debug('S3: Copy filestore to S3. Connected Sucessfuly ({})'.format(storage))
             except Exception:
-                _logger.error('S3: Copy filestore to S3. Was not able to connect (%s), gonna try other filestore',
-                              storage)
+                _logger.error('S3: Copy filestore to S3. Was not able to connect ({}), '
+                              'gonna try other filestore'.format(storage))
             s3 = boto3.client('s3')
             db_name = os.path.basename(os.path.dirname(full_path))
             for root, dirs, files in os.walk(full_path):
                 for file_name in files:
                     path = os.path.join(root, file_name)
                     bucket_name = self._s3_bucket.name
-                    s3.upload_file(path, bucket_name,  '%s/%s' % (db_name, path[len(full_path):]))
-                    _logger.debug('S3: Copy filestore to S3. Loading file %s/%s', db_name, path[len(full_path):])
-            self.env['ir.config_parameter'].sudo().set_param('ir_attachment.location_s3_copied_to', '%' % s3_url,
-                                                             groups=['base.group_system'])
+                    s3.upload_file(path, bucket_name,  '{}/{}'.format(
+                        db_name, path[len(full_path):]))
+                    _logger.debug('S3: Copy filestore to S3. Loading file {}/{}'.format(
+                        db_name, path[len(full_path):]))
+            self.env['ir.config_parameter'].sudo().set_param(
+                'ir_attachment.location_s3_copied_to', '{}'.format(s3_url))
 
     @api.multi
     def check_s3_filestore(self):
@@ -329,9 +360,9 @@ class S3Attachment(models.Model):
         try:
             if not self._s3_bucket:
                 self._s3_bucket = self._connect_to_S3_bucket(storage)
-            _logger.debug('S3: _file_gc_s3 connected Sucessfuly (%s)', storage)
+            _logger.debug('S3: _file_gc_s3 connected Sucessfuly ({})'.format(storage))
         except Exception:
-            _logger.error('S3: _file_gc_s3 was not able to connect (%s)', storage)
+            _logger.error('S3: _file_gc_s3 was not able to connect ({})'.format(storage))
             return False
 
         status_res = []
@@ -358,16 +389,18 @@ class S3Attachment(models.Model):
                     att.s3_key = s3_key.key
                     att.s3_url = '%s/%s/%s' % (
                         s3_key.meta.client.meta.endpoint_url, s3_key.bucket_name, s3_key.key)
-                    _logger.debug('S3: check_s3_filestore updated s3_url for key:%s', key)
+                    _logger.debug('S3: check_s3_filestore updated s3_url for key:{}'.format(key))
 
-                _logger.debug('S3: check_s3_filestore read key:%s from bucket successfully', key)
+                _logger.debug('S3: check_s3_filestore read key:{} from bucket successfully'.format(
+                    key))
 
             except ClientError as ex:
                 if int(ex.response['Error']['Code']) == 404:
                     status['s3_lost'] = True
                     totals['lost_count'] += 1
 
-                _logger.error('S3: check_s3_filestore was not able to read from S3 or other filestore key:%s', key)
+                _logger.error('S3: check_s3_filestore was not able to read from S3 or other '
+                              'filestore key:{}'.format(key))
                 att.s3_lost = True
                 status['error'] = ex.response['Error']['Message']
 

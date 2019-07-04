@@ -51,12 +51,12 @@ com = xmlrpclib.ServerProxy("%s://%s:%s/xmlrpc/common" % (protocol, host, port))
 uid = com.login(dbname, user, pwd)
 sock = xmlrpclib.ServerProxy("%s://%s:%s/xmlrpc/object" % (protocol, host, port))
 
-config_id = sock.execute(dbname, uid, pwd, 'base.config.settings', 'create', [], {
+config_id = sock.execute(dbname, uid, pwd, 'res.config.settings', 'create', [], {
     's3_profile': 'default',
     's3_bucket': 'testodoofs1',
     's3_load': True
 })
-res = sock.execute(dbname, uid, pwd, 'base.config.settings', 'execute', [config_id])
+res = sock.execute(dbname, uid, pwd, 'res.config.settings', 'execute', [config_id])
 ```
 
 Also recommend using on your odoo.conf file on server wide modules:
@@ -71,6 +71,9 @@ Odoo will install without the s3 filestore and after initialization will move al
 This will happen using the bucket_name in odoo_s3/data/filestore_data.xml
 
 ## Changelog
+
+* change code to be odoo 12.0  and python 3 compatible
+* update requirements, awscli still needed to generate the config file
 
 * added recovery of trashed files if there is a failed read
 * changed the dependency from awscli for initial move of the fs
